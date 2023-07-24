@@ -1,85 +1,62 @@
 package server
 
 import (
-	"errors"
 	"go-netty/handler"
 	"go-netty/serialize"
-	"io"
+	"log"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 type Server struct {
-	conn    net.Conn
-	handler handler.Handler
-	decoder serialize.Decoder
+	boss      BossEventLoopGroup
+	worker    WorkerEventLoopGroup
+	chanClose chan bool
 }
 
 func New() *Server {
-	return &Server{}
-}
-func (s *Server) Handler(handler handler.Handler) *Server {
-	s.handler = handler
-	return s
+	return &Server{
+		chanClose: make(chan bool),
+	}
 }
 
-func (s *Server) Decoder(decoder serialize.Decoder) *Server {
-	s.decoder = decoder
+func (s *Server) BootStrap(bossSize, workerSize int) *Server {
+	s.worker = WorkerEventLoopGroup{
+		chanConn:   make(chan net.Conn),
+		chanClose:  make(chan bool, 1),
+		workerSize: workerSize,
+		decoder:    serialize.TlvDecoder{},
+		handler:    handler.InputHandler{},
+	}
+	s.boss = BossEventLoopGroup{
+		size:     bossSize,
+		chanExit: make(chan bool, 1),
+		worker:   s.worker,
+	}
 	return s
 }
-
-func (s *Server) ServeTCP(addr string) error {
-	l, err := net.Listen("tcp", addr)
+func (s *Server) RegisterClose() error {
+	c := make(chan os.Signal)
+	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM,
+		syscall.SIGQUIT, syscall.SIGUSR1, syscall.SIGUSR2)
+	<-c
+	return s.Close()
+}
+func (s *Server) Close() error {
+	log.Println("Close Begin")
+	err := s.boss.Close()
 	if err != nil {
 		return err
 	}
-	for {
-		s.accept(l)
-	}
-
+	s.worker.Close()
+	s.chanClose <- true
 	return nil
 }
-
-func (s *Server) accept(l net.Listener) {
-	defer func() {
-		if recErr := recover(); recErr != nil {
-			s.handler.OnError(recErr.(error))
-			s.conn.Close()
-		}
-	}()
-	var err error
-	s.conn, err = l.Accept()
-	if err != nil {
-		s.handler.OnError(err)
-		return
-	}
-	//Connection Ready
-	err = s.handler.OnAccept(s.conn)
-	if err != nil {
-		s.handler.OnError(err)
-		return
-	}
-	go func(conn net.Conn) {
-		for {
-			msg, err := s.decoder.Decode(conn)
-			if errors.Is(err, io.EOF) {
-				s.handler.OnDisConnect(conn)
-				break
-			}
-			if err != nil {
-				s.handler.OnError(err)
-				break
-			}
-			s.handler.OnRead(msg, conn)
-		}
-		if conn != nil {
-			err = conn.Close()
-		}
-		if err != nil {
-			s.handler.OnError(err)
-		}
-		err = s.handler.OnClose()
-		if err != nil {
-			s.handler.OnError(err)
-		}
-	}(s.conn)
+func (s *Server) ServeTCP(addr string) {
+	go s.RegisterClose()
+	s.boss.ServeTCP(addr)
+	s.worker.Start()
+	<-s.chanClose
 }

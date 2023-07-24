@@ -9,6 +9,6 @@ type Handler interface {
 	OnAccept(conn net.Conn) error
 	OnRead(msg serialize.Message, conn net.Conn)
 	OnDisConnect(conn net.Conn)
-	OnClose() error
+	OnClose(conn net.Conn) error
 	OnError(err error)
 }

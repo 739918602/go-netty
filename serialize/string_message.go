@@ -15,6 +15,6 @@ func (s StringMessage) Header() interface{} {
 	return s.header
 }
 
-func (s StringMessage) Payload() interface{} {
-	return s.payload
+func (s StringMessage) Payload() []byte {
+	return []byte(s.payload)
 }

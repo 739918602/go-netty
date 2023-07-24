@@ -11,8 +11,8 @@ func (s JsonMessage) Header() interface{} {
 	return string(s.header)
 }
 
-func (s JsonMessage) Payload() interface{} {
-	return string(s.payload)
+func (s JsonMessage) Payload() []byte {
+	return s.payload
 }
 func (s JsonMessage) UnmarshalPayload(target interface{}) error {
 	err := json.Unmarshal(s.payload, target)
